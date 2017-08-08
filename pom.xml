@@ -98,7 +98,7 @@
         </executions>
           <configuration>
             <cleanupDaemonThreads>false</cleanupDaemonThreads>
-            <mainClass>com.bombora.custom.segment.CustomSegmentPipeline</mainClass>
+            <mainClass>com.bombora.pubsub.to.PubSubToBQPipeline</mainClass>
           </configuration>
         </plugin>
       </plugins>
@@ -111,27 +111,7 @@
       	</extension>
 	</extensions>
   </build>
-  
-  <distributionManagement>
-    <repository>
-      <id>s3-bombora-maven-repo</id>
-      <name>Bombora Internal s3 Release Repository</name>
-      <url>s3://bombora-maven/release</url>
-    </repository>
-    <snapshotRepository>
-      <id>s3-bombora-maven-repo</id>
-      <name>Bombora Internal s3 Snapshot Repository</name>
-      <url>s3://bombora-maven/snapshot</url>
-    </snapshotRepository>
-  </distributionManagement>
-  
-  <repositories>
-   	<repository>
-   		<id>s3-bombora-maven-repo</id>
-   		<name>Bombora Internal S3 Repository</name>
-   		<url>s3://bombora-maven/release</url>
-  	</repository>
-  </repositories>
+ 
   
   <dependencies>
     <!-- Adds a dependency on a specific version of the Dataflow SDK. -->
