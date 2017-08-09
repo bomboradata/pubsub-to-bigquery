@@ -25,3 +25,5 @@ Parameters formatted view:
    <schema>{"fields":[{"description":null,"fields":null,"mode":"REQUIRED","name":"Student_Name","type":"STRING","ETag":null}],"ETag":null}</schema>
 </params>
 ```
+
+This pipeline can also support streaming data into a date partitioned BQ table with a streaming pipeline. [Details](http://meethassan.net/2017/08/07/streaming-writes-into-a-date-partitioned-bigquery-table-using-a-dataflow-streaming-pipeline/)
