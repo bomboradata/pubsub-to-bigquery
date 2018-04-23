@@ -1,7 +1,7 @@
 package com.bombora.pubsub.to.bq;
 
 import java.io.ByteArrayInputStream;
-import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.text.ParseException;
@@ -11,26 +11,27 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 
+import org.apache.beam.runners.dataflow.DataflowRunner;
+import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
+import org.apache.beam.runners.dataflow.options.DataflowPipelineWorkerPoolOptions.AutoscalingAlgorithmType;
+import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
+import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
+import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.values.PCollection;
+import org.apache.commons.lang.StringUtils;
 import org.w3c.dom.DOMException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.jackson.JacksonFactory;
+
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
-import com.google.cloud.dataflow.sdk.Pipeline;
-import com.google.cloud.dataflow.sdk.io.BigQueryIO;
-import com.google.cloud.dataflow.sdk.io.PubsubIO;
-import com.google.cloud.dataflow.sdk.options.DataflowPipelineOptions;
-import com.google.cloud.dataflow.sdk.options.DataflowPipelineWorkerPoolOptions.AutoscalingAlgorithmType;
-import com.google.cloud.dataflow.sdk.options.PipelineOptionsFactory;
-import com.google.cloud.dataflow.sdk.runners.DataflowPipelineRunner;
-import com.google.cloud.dataflow.sdk.transforms.ParDo;
-import com.google.cloud.dataflow.sdk.values.PCollection;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.gson.Gson;
 
 
@@ -43,6 +44,7 @@ public class PubSubToBQPipeline {
 	private static String zone;
 	private static String pipelineName; 
 	private static String pubSubTopic;
+	private static String pubSubTopicSub;
 	private static String bqDataSet;
 	private static String bqTable;
 	private static String schemaStr;
@@ -50,7 +52,7 @@ public class PubSubToBQPipeline {
 	private static int maxNumWorkers;
 	private static int diskSizeGb;
 	private static String machineType;
-
+	private static boolean owTimestamp, debugMode;
 
 	public static void main(String[] args) throws GeneralSecurityException, IOException, ParseException, ParserConfigurationException, SAXException {
 		String params = null;
@@ -62,23 +64,19 @@ public class PubSubToBQPipeline {
 		System.out.println(params);
 		init(params);
 
-		GoogleCredential credential = new GoogleCredential.Builder()
-				.setTransport(new NetHttpTransport())
-				.setJsonFactory(new JacksonFactory())
-				.setServiceAccountId(accountEmail)
-				.setServiceAccountScopes(Arrays.asList(new String[] {"https://www.googleapis.com/auth/cloud-platform"}))
-				.setServiceAccountPrivateKeyFromP12File(new File(keyFile))
-				.build();
+		GoogleCredentials credentials = ServiceAccountCredentials.fromStream(new FileInputStream(keyFile))
+		        .createScoped(Arrays.asList(new String[] { "https://www.googleapis.com/auth/cloud-platform" }));
 
 		DataflowPipelineOptions options = PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
-		options.setRunner(DataflowPipelineRunner.class);
+		
+		options.setRunner(DataflowRunner.class);
 		// Your project ID is required in order to run your pipeline on the Google Cloud.
 		options.setProject(projectId);
 		// Your Google Cloud Storage path is required for staging local files.
 		options.setStagingLocation(workingBucket);
-		options.setGcpCredential(credential);
-		options.setServiceAccountName(accountEmail);
-		options.setServiceAccountKeyfile(keyFile);
+		options.setTempLocation(workingBucket + "/temp");
+		options.setGcpCredential(credentials);
+		options.setServiceAccount(accountEmail);
 		options.setMaxNumWorkers(maxNumWorkers);
 		options.setDiskSizeGb(diskSizeGb);
 		options.setWorkerMachineType(machineType);
@@ -86,20 +84,25 @@ public class PubSubToBQPipeline {
 		options.setZone(zone);
 		options.setStreaming(isStreaming);
 		options.setJobName(pipelineName);
-
-
+		Pipeline pipeline = Pipeline.create(options);
+		
 		Gson gson = new Gson();
 		TableSchema schema = gson.fromJson(schemaStr, TableSchema.class);
-		Pipeline pipeline = Pipeline.create(options);
-		PCollection<String> streamData =
-				pipeline.apply(PubsubIO.Read.named("ReadFromPubsub")
-						.topic(String.format("projects/%1$s/topics/%2$s",projectId,pubSubTopic)));
-		PCollection<TableRow> tableRow = streamData.apply("ToTableRow", ParDo.of(new PrepData.ToTableRow()));
-
-
-		tableRow.apply(BigQueryIO.Write
-				.named("WriteBQTable")
-				.to(String.format("%1$s:%2$s.%3$s",projectId, bqDataSet, bqTable))
+		
+		PCollection<String> streamData = null;
+		if(pubSubTopicSub != null && !StringUtils.isEmpty(pubSubTopicSub)){
+			streamData = pipeline.apply("ReadPubSub",PubsubIO.readStrings().fromSubscription(String.format("projects/%1$s/subscriptions/%2$s",projectId,pubSubTopicSub)));
+		}
+		else if(pubSubTopic != null && !StringUtils.isEmpty(pubSubTopic)){
+			streamData = pipeline.apply("ReadPubSub",PubsubIO.readStrings().fromTopic(String.format("projects/%1$s/topics/%2$s",projectId,pubSubTopic)));
+		}
+		
+		PCollection<TableRow> tableRow = streamData.apply("ToTableRow",ParDo.of(new PrepData.ToTableRow(owTimestamp, debugMode)));
+		
+		
+		tableRow.apply("WriteToBQ",
+				BigQueryIO.writeTableRows()
+				.to(String.format("%1$s.%2$s",bqDataSet, bqTable))
 				.withSchema(schema)
 				.withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND));
 
@@ -113,7 +116,9 @@ public class PubSubToBQPipeline {
 		DocumentBuilder builder = factory.newDocumentBuilder();
 		Document document = builder.parse(new ByteArrayInputStream(params.getBytes()));
 		NodeList nodeList = document.getDocumentElement().getChildNodes();
-
+		
+		debugMode = owTimestamp = false;
+		
 		for (int i = 0; i < nodeList.getLength(); i++) {
 			Node node = nodeList.item(i);
 			String name = node.getNodeName();
@@ -160,7 +165,14 @@ public class PubSubToBQPipeline {
 			case "pubSubTopic":
 				pubSubTopic = node.getTextContent();
 				break;
-
+			case "pubSubTopicSub":
+				pubSubTopicSub = node.getTextContent();
+				break;
+			case "owTimestamp":
+				owTimestamp = Boolean.parseBoolean(node.getTextContent());
+			case "debugMode":
+				debugMode = Boolean.parseBoolean(node.getTextContent());
+        break;
 			}
 		}
 		return;

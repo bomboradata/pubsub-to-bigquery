@@ -18,9 +18,9 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>com.bombora.dataflow</groupId>
-  <artifactId>dataflow-common</artifactId>
-  <version>1.0.4</version>
+  <groupId>com.bombora.pubsub.to.bq</groupId>
+  <artifactId>dataflow-pubsub-to-bq</artifactId>
+  <version>1.0.6</version>
   <packaging>jar</packaging>
   <build>
    <plugins>
@@ -36,7 +36,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>2.3</version>
+        <version>3.1.0</version>
         <executions>
           <execution>
             <phase>package</phase>
@@ -44,12 +44,6 @@
               <goal>shade</goal>
             </goals>
             <configuration>
-              <finalName>${project.artifactId}-bundled-${project.version}</finalName>
-              <artifactSet>
-                <includes>
-                  <include>*:*</include>
-                </includes>
-              </artifactSet>
               <filters>
                 <filter>
                   <artifact>*:*</artifact>
@@ -60,29 +54,30 @@
                   </excludes>
                 </filter>
               </filters>
+              <!-- Additional configuration. -->
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.bombora.pubsub.to.bq.PubSubToBQPipeline</mainClass>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/services/org.apache.beam.sdk.io.FileSystemRegistrar</resource>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/services/org.apache.beam.sdk.coders.CoderProviderRegistrar</resource>
+                </transformer>
+              </transformers>
             </configuration>
           </execution>
         </executions>
       </plugin>
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>2.18.1</version>
-        <configuration>
-          <parallel>all</parallel>
-          <threadCount>4</threadCount>
-          <redirectTestOutputToFile>true</redirectTestOutputToFile>
-        </configuration>
-        <dependencies>
-          <dependency>
-            <groupId>org.apache.maven.surefire</groupId>
-            <artifactId>surefire-junit47</artifactId>
-            <version>2.18.1</version>
-          </dependency>
-          
-        </dependencies>
-      </plugin>
-    </plugins>
+   		<groupId>org.apache.maven.plugins</groupId>
+   		<artifactId>maven-surefire-plugin</artifactId>
+   		<configuration>
+     		<testFailureIgnore>true</testFailureIgnore>
+   		</configuration>
+ 	  </plugin>
+    </plugins>          
     <pluginManagement>
       <plugins>
         <plugin>
@@ -98,32 +93,63 @@
         </executions>
           <configuration>
             <cleanupDaemonThreads>false</cleanupDaemonThreads>
-            <mainClass>com.bombora.pubsub.to.PubSubToBQPipeline</mainClass>
+            <mainClass>com.bombora.pubsub.to.bq.PubSubToBQPipeline</mainClass>
           </configuration>
         </plugin>
       </plugins>
     </pluginManagement>
     <extensions>
-      	<extension>
-        	<groupId>org.springframework.build</groupId>
-        	<artifactId>aws-maven</artifactId>
-        	<version>5.0.0.RELEASE</version>
-      	</extension>
+      <extension>
+        <groupId>org.springframework.build</groupId>
+        <artifactId>aws-maven</artifactId>
+        <version>5.0.0.RELEASE</version>
+      </extension>
 	</extensions>
   </build>
  
+  <distributionManagement>
+    <repository>
+      <id>s3-bombora-maven-repo</id>
+      <name>Bombora Internal s3 Release Repository</name>
+      <url>s3://bombora-maven/release</url>
+    </repository>
+    <snapshotRepository>
+      <id>s3-bombora-maven-repo</id>
+      <name>Bombora Internal s3 Snapshot Repository</name>
+      <url>s3://bombora-maven/snapshot</url>
+    </snapshotRepository>
+  </distributionManagement>
+  
+  <repositories>
+   	<repository>
+   	  <id>s3-bombora-maven-repo</id>
+   	  <name>Bombora Internal S3 Repository</name>
+   	  <url>s3://bombora-maven/release</url>
+  	</repository>
+  </repositories>
   
   <dependencies>
     <!-- Adds a dependency on a specific version of the Dataflow SDK. -->
     <dependency>
-	    	<groupId>com.google.code.gson</groupId>
-	    	<artifactId>gson</artifactId>
-	    	<version>2.6.2</version>
-		</dependency>
+	  <groupId>com.google.code.gson</groupId>
+	  <artifactId>gson</artifactId>
+	  <version>2.6.2</version>
+	</dependency>
     <dependency>
-    	<groupId>com.google.cloud.dataflow</groupId>
-    	<artifactId>google-cloud-dataflow-java-sdk-all</artifactId>
-    	<version>1.9.0</version>
+      <groupId>com.google.cloud.dataflow</groupId>
+      <artifactId>google-cloud-dataflow-java-sdk-all</artifactId>
+      <version>[2.2.0, 2.99)</version>
+    </dependency>
+    <dependency>
+	  <groupId>com.fasterxml.jackson.core</groupId>
+	  <artifactId>jackson-databind</artifactId>
+	  <version>2.6.3</version>
+	</dependency>
+	<dependency>
+      <groupId>org.kie.modules</groupId>
+      <artifactId>org-apache-commons-lang3</artifactId>
+      <version>6.5.0.Final</version>
+      <type>pom</type>
     </dependency>
     <!-- slf4j API frontend binding with JUL backend -->
     <dependency>
@@ -151,48 +177,30 @@
       <version>4.11</version>
     </dependency>
 	<dependency>
+	  <groupId>org.apache.commons</groupId>
+	  <artifactId>commons-collections4</artifactId>
+	  <version>4.1</version>
+	</dependency>
+	<dependency>
+	  <groupId>org.mod4j.org.apache.commons</groupId>
+	  <artifactId>lang</artifactId>
+	  <version>2.1.0</version>
+	</dependency>
+	<dependency>
+	  <groupId>com.google.api-client</groupId>
+	  <artifactId>google-api-client-jackson2</artifactId>
+	  <version>1.22.0</version>
+	</dependency>
+	<dependency>
+	  <groupId>com.google.http-client</groupId>
+	  <artifactId>google-http-client-jackson</artifactId>
+	  <version>1.22.0</version>
+	</dependency>
+	<dependency>
    <groupId>org.apache.beam</groupId>
    <artifactId>beam-runners-direct-java</artifactId>
-   <version>2.0.0</version>
+   <version>2.2.0</version>
    <scope>runtime</scope>
 </dependency>
-	<dependency>
-		<groupId>org.apache.commons</groupId>
-		<artifactId>commons-collections4</artifactId>
-		<version>4.1</version>
-	</dependency>
-	<dependency>
-		<groupId>org.mod4j.org.apache.commons</groupId>
-		<artifactId>lang</artifactId>
-		<version>2.1.0</version>
-	</dependency>
   </dependencies>
-
-	<profiles>
-	    <profile>
-
-<id>direct-runner</id>
-
-<activation>
-
-<activeByDefault>true</activeByDefault>
-
-</activation>
-
-<dependencies>
-
-<dependency>
-
-<groupId>org.apache.beam</groupId>
-
-<artifactId>beam-runners-direct-java</artifactId>
-
-<version>0.2.0-incubating</version>
-
-</dependency>
-
-</dependencies>
-
-</profile>
-	</profiles>
 </project>
